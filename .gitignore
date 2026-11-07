@@ -26,3 +26,9 @@ nbproject/Package-*.bash
 .DS_Store
 Thumbs.db
 *.bak
+
+# Carpeta de compilación de MPLAB X
+debug/
+
+# Makefile generado por MPLAB X
+/Makefile
