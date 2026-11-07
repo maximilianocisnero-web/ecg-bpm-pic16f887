@@ -22,7 +22,13 @@
 ; CONSTANTES
 ;===============================================================================
 
-; Declaracion de constantes con EQU
+; ---frecuencia y temporizacion---
+	
+;---deteccion de QRS---
+	
+;---Alarma---
+	
+;---Display---
 
 ;===============================================================================
 ; VARIABLES
@@ -52,15 +58,29 @@
         ORG     0x05
 
 INICIO:
-        ; Inicializacion del microcontrolador
-        ; Configuracion de puertos
-        ; Configuracion de perifericos
+        ;---Inicializar el micro---
+	
+	
+	;---configuracion de puertos---
+	
+	
+	;---configuracon del ADC---
+	
+	
+	;---inicializacion de variables---
+	
+	
+	;---configuracion Timer1---
+	
 
 MAIN_LOOP:
-
-        ; Logica principal del programa
-
-        GOTO    MAIN_LOOP
+    
+    GOTO    MAIN_BOTONES
+	
+	
+MAIN_BOTONES:
+    
+    GOTO MAIN_LOOP
 
 ;===============================================================================
 ; SUBRUTINAS
