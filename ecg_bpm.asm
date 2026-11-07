@@ -1,5 +1,5 @@
 ;===============================================================================
-; @file        nombre_archivo.asm
+; @file        ecg-bpm-pic16f887.asm
 ; @author      Grupo 17
 ; @date        07/11/2026
 ; @version     1.0
@@ -15,21 +15,21 @@
 ;===============================================================================
 ; CONFIGURACION
 ;===============================================================================
-
-; Configuracion de bits del PIC
+    __CONFIG _CONFIG1, _FOSC_INTRC_NOCLKOUT & _WDTE_OFF & _PWRTE_ON & _MCLRE_OFF & _BOREN_OFF & _LVP_OFF & _CPD_OFF & _CP_OFF
+    __CONFIG _CONFIG2, _IESO_OFF & _FCMEN_OFF
 
 ;===============================================================================
 ; CONSTANTES
 ;===============================================================================
 
-; ---frecuencia y temporizacion---
-	
+; ---oscilador---
+;---Timer1---
+;---ADC---
 ;---deteccion de QRS---
-	
+;---ventana de calculo---	
 ;---Alarma---
-	
 ;---Display---
-
+;---comunicacion UART---
 ;===============================================================================
 ; VARIABLES
 ;===============================================================================
@@ -62,7 +62,33 @@ INICIO:
 	
 	
 	;---configuracion de puertos---
-	
+	 BANKSEL TRISA
+        BSF     TRISA,0             ; RA0 entrada (AN0)
+        
+	BANKSEL TRISB
+        CLRF    TRISB               ; PORTB salida (segmentos)
+        
+	BANKSEL TRISD
+        CLRF    TRISD               ; PORTD salida (dígitos)
+        
+	BANKSEL TRISC
+        BCF     TRISC,0             ; RC0 salida (buzzer)
+        
+	BANKSEL TRISE
+        BSF     TRISE,0             ; RE0 entrada (freeze)
+        BSF     TRISE,1             ; RE1 entrada (mute)
+
+        BANKSEL PORTA
+        CLRF    PORTA
+        
+	BANKSEL PORTB
+        CLRF    PORTB
+        
+	BANKSEL PORTC
+        CLRF    PORTC
+        
+	BANKSEL PORTD
+        CLRF     PORTD
 	
 	;---configuracon del ADC---
 	
