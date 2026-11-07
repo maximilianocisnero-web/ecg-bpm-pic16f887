@@ -1,0 +1,28 @@
+# Compilación de MPLAB X
+build/
+dist/
+*.o
+*.obj
+*.hex
+*.map
+*.lst
+*.cmf
+*.sym
+*.sdb
+*.d
+*.p1
+*.pre
+*.as
+*.hxl
+*.mum
+*.elf
+
+# Configuración privada de MPLAB X
+nbproject/private/
+nbproject/Makefile-*.mk
+nbproject/Package-*.bash
+
+# Sistema operativo / editor
+.DS_Store
+Thumbs.db
+*.bak
