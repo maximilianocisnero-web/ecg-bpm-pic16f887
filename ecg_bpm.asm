@@ -1,4 +1,4 @@
-===============================================================================
+;===============================================================================
 ; @file        ecg-bpm-pic16f887.asm
 ; @author      Grupo 17
 ; @date        07/11/2026
@@ -26,32 +26,38 @@ MAX_LPM     EQU .100        ; Límite para activar la alarma de taquicardia
     
     
     
-
 ;===============================================================================
 ; VARIABLES
 ;===============================================================================
     CBLOCK  0x20
         ; Registros para el conteo de tiempo (Timer 1)
-        TIEMPO_L            ; Parte baja del tiempo entre pulsos
-        TIEMPO_H            ; Parte alta del tiempo entre pulsos
+        TIEMPO_L            
+        TIEMPO_H            
         
         ; Registros para el cálculo de latidos (División Shift & Subtract)
-        DIVIDENDO_L         ; (Usaremos 3 o 4 bytes según el escalado)
+        DIVIDENDO_L         
         DIVIDENDO_H
         DIVIDENDO_U
         LPM_ACTUAL          ; Resultado final de latidos por minuto
+        RESTO_L             
+        RESTO_H             
+        CONTADOR            
+        
+        ; --- NUEVAS VARIABLES PARA DISPLAYS ---
+        CENTENAS            ; Guarda el dígito de las centenas (0-9)
+        DECENAS             ; Guarda el dígito de las decenas (0-9)
+        UNIDADES            ; Guarda el dígito de las unidades (0-9)
+        TEMP_LPM            ; Variable temporal para no borrar el LPM original
+        ESTADO_MUX          ; Lleva la cuenta de qué display encender (0, 1 o 2)
         
         ; Variables para el multiplexado de los 3 displays de 7 segmentos
-        DIGITO_U            ; Unidades
-        DIGITO_D            ; Decenas
-        DIGITO_C            ; Centenas
+        DIGITO_U            
+        DIGITO_D            
+        DIGITO_C            
         
         ; Banderas del sistema
         FLAGS               ; Bit0=Alarma_Temp, Bit1=Alarma_LPM, Bit2=Freeze
-    ENDC     
-     
-     
-
+    ENDC
 ;===============================================================================
 ; MACROS
 ;===============================================================================
@@ -90,7 +96,7 @@ INICIO:
         MOVWF   TRISB
 
         BANKSEL TRISC
-        MOVLW   b'10000000'         ; RC7 entrada (RX USART), RC6 salida (TX USART), RC0 salida (Buzzer)
+        MOVLW   b'10100000'         ; RC7 entrada (RX USART), RC6 salida (TX USART), RC0 salida (Buzzer)
         MOVWF   TRISC
 
         BANKSEL TRISD
@@ -144,6 +150,8 @@ INICIO:
         BSF     INTCON, 5           ; T0IE: Habilita interrupción del Timer 0 (para refrescar displays)
         BSF     INTCON, 6           ; PEIE: Habilita interrupciones periféricas (necesario para Timer 1 y ADC)
         BSF     INTCON, 7           ; GIE: Habilitación global de interrupciones (Activa todo el sistema)
+
+	;MIRAR DE HACER EN 10
 	
 ; 9. Configuración del USART (Comunicación Serie a PC)
         BANKSEL SPBRG
@@ -155,6 +163,7 @@ INICIO:
         BANKSEL RCSTA
         MOVLW   b'10000000'         ; SPEN=1 (Habilita el puerto serie en pines RC6/RC7)
         MOVWF   RCSTA	
+	
 ;===============================================================================
 ; VECTOR DE INTERRUPCION (ISR)
 ;===============================================================================
@@ -264,13 +273,62 @@ PROCESAR_LATIDO:
         BANKSEL T1CON
         BSF     T1CON, 0            ; TMR1ON = 1 (Vuelve a arrancar)
         
-        ; 4. Rutina de División (Shift & Subtract) para calcular LPM
-        ; Aquí se alinea la constante de tiempo (dividendo) y se resta el TIEMPO medido.
-        ; Por simplicidad en esta maqueta, cargamos un valor simulado de prueba (ej: 75 LPM)
-        ; si el tiempo leído es válido. (La rutina matemática completa se integrará luego).
-        MOVLW   .75                 ; Simulamos que el cálculo dio 75 LPM
-        MOVWF   LPM_ACTUAL
+       ; 4. Rutina de División (Shift & Subtract) para calcular LPM
+        ; Dividimos la constante 7.500.000 (0x007270E0) por el TIEMPO medido.
+        MOVLW   0xE0                ; Cargamos la constante 24-bits
+        MOVWF   DIVIDENDO_L
+        MOVLW   0x70
+        MOVWF   DIVIDENDO_H
+        MOVLW   0x72
+        MOVWF   DIVIDENDO_U
         
+        CLRF    RESTO_L             ; Limpiamos los restos
+        CLRF    RESTO_H
+        MOVLW   .24                 ; Son 24 desplazamientos (24 bits)
+        MOVWF   CONTADOR
+
+DIV_LOOP:
+        ; Desplazamos Dividendo a la izquierda
+        BCF     STATUS, C
+        RLF     DIVIDENDO_L, F
+        RLF     DIVIDENDO_H, F
+        RLF     DIVIDENDO_U, F
+        ; Desplazamos Resto a la izquierda llevándonos el bit de acarreo
+        RLF     RESTO_L, F
+        RLF     RESTO_H, F
+
+        ; Restamos TIEMPO del RESTO (Resto = Resto - Tiempo)
+        MOVF    TIEMPO_L, W
+        SUBWF   RESTO_L, F
+        BTFSS   STATUS, C           ; ¿Hubo préstamo (borrow)?
+        DECF    RESTO_H, F          ; Si hubo, descontamos del byte alto
+        MOVF    TIEMPO_H, W
+        SUBWF   RESTO_H, F
+
+        ; Verificamos si la resta fue exitosa (Resto >= 0)
+        BTFSS   STATUS, C
+        GOTO    DIV_RESTAURA        ; Si dio negativo, deshacemos la resta
+        
+        BSF     DIVIDENDO_L, 0      ; Si dio positivo, el bit del cociente es 1
+        GOTO    DIV_SIGUIENTE
+
+DIV_RESTAURA:
+        ; Sumamos el TIEMPO de vuelta para deshacer la resta inválida
+        MOVF    TIEMPO_L, W
+        ADDWF   RESTO_L, F
+        BTFSC   STATUS, C
+        INCF    RESTO_H, F
+        MOVF    TIEMPO_H, W
+        ADDWF   RESTO_H, F
+
+DIV_SIGUIENTE:
+        DECFSZ  CONTADOR, F         ; ¿Ya hicimos los 24 bits?
+        GOTO    DIV_LOOP            ; Si no, repetimos
+        
+        ; Al terminar, el resultado queda guardado en la parte baja del dividendo
+        MOVF    DIVIDENDO_L, W
+        MOVWF   LPM_ACTUAL
+	
         ; 5. Verificamos Alarma de Taquicardia
         MOVF    LPM_ACTUAL, W
         SUBLW   MAX_LPM             ; Resta: 100 - LPM_ACTUAL
@@ -290,45 +348,125 @@ APAGAR_ALARMA_LPM:
         ; Solo apagamos el buzzer si tampoco hay alarma de temperatura (bit 0 de FLAGS)
         BTFSS   FLAGS, 0
         BCF     PORTC, 0            ; Apaga Buzzer
-
 ACTUALIZAR_DISPLAYS:
-        ; Aquí se separan centenas, decenas y unidades del valor LPM_ACTUAL 
-        ; y se guardan en DIGITO_C, DIGITO_D y DIGITO_U.
-        ; (Simulación rápida para prueba visual)
-        MOVLW   b'00111111'         ; Código 7-seg para el '0'
-        MOVWF   DIGITO_C
-        MOVLW   b'00000111'         ; Código 7-seg para el '7'
-        MOVWF   DIGITO_D
-        MOVLW   b'01101101'         ; Código 7-seg para el '5'
+        ; 1. Extraemos los dígitos llamando a la rutina de conversión
+        CALL    BIN2BCD
+        
+        ; 2. Convertimos el número de Unidades a código de 7 segmentos
+        MOVF    UNIDADES, W
+        CALL    TABLA_7SEG
         MOVWF   DIGITO_U
+        
+        ; 3. Convertimos las Decenas a código de 7 segmentos
+        MOVF    DECENAS, W
+        CALL    TABLA_7SEG
+        MOVWF   DIGITO_D
+        
+        ; 4. Convertimos las Centenas a código de 7 segmentos
+        MOVF    CENTENAS, W
+        CALL    TABLA_7SEG
+        MOVWF   DIGITO_C
         
         RETURN
 
 ;-------------------------------------------------------------------------------
 ; @brief MULTIPLEXAR_DISPLAYS
-; @details Se llama desde la interrupción del Timer 0. Enciende de a un display 
-;          por vez a alta velocidad. Utiliza el Puerto B para los segmentos y 
-;          el Puerto D para los transistores de cada dígito.
+; @details Apaga y enciende rotativamente un transistor a la vez (RD0, RD1, RD2)
 ;-------------------------------------------------------------------------------
 MULTIPLEXAR_DISPLAYS:
-        ; Si está activa la función Freeze, no actualizamos los displays
-        BTFSC   FLAGS, 2
-        RETURN
+        BTFSC   FLAGS, 2            ; ¿Está presionado Freeze?
+        RETURN                      ; Si es sí, sale sin actualizar
         
-        ; Apagamos todos los transistores (Puerto D) para evitar efecto fantasma
         BANKSEL PORTD
-        CLRF    PORTD
+        CLRF    PORTD               ; Apagamos los 3 displays para evitar luz fantasma
         
-        ; (Lógica de rotación de dígitos usando una variable de estado que cuenta 1, 2, 3)
-        ; Simulamos encender el display de las unidades
+        MOVF    ESTADO_MUX, W
+        BTFSC   STATUS, Z           ; Si ESTADO_MUX es 0, salta a centenas
+        GOTO    MUX_CENTENAS
+        SUBLW   .1                  
+        BTFSC   STATUS, Z           ; Si era 1 (1-1=0), salta a decenas
+        GOTO    MUX_DECENAS
+        GOTO    MUX_UNIDADES        ; Si es 2, salta a unidades
+
+MUX_CENTENAS:
         BANKSEL PORTB
-        MOVF    DIGITO_U, W         ; Carga el código de 7 segmentos de las unidades
-        MOVWF   PORTB               ; Lo manda al Puerto B
-        
+        MOVF    DIGITO_C, W
+        MOVWF   PORTB               ; Envia el dibujo de la centena a los segmentos
         BANKSEL PORTD
-        BSF     PORTD, 0            ; Enciende el transistor del dígito 1 (Unidades)
-        
+        BSF     PORTD, 2            ; Enciende el transistor de la Centena (RD2)
+        INCF    ESTADO_MUX, F       ; Pasa al estado 1 para la próxima vuelta
         RETURN
+        
+MUX_DECENAS:
+        BANKSEL PORTB
+        MOVF    DIGITO_D, W
+        MOVWF   PORTB
+        BANKSEL PORTD
+        BSF     PORTD, 1            ; Enciende el transistor de la Decena (RD1)
+        INCF    ESTADO_MUX, F       ; Pasa al estado 2
+        RETURN
+        
+MUX_UNIDADES:
+        BANKSEL PORTB
+        MOVF    DIGITO_U, W
+        MOVWF   PORTB
+        BANKSEL PORTD
+        BSF     PORTD, 0            ; Enciende el transistor de la Unidad (RD0)
+        CLRF    ESTADO_MUX          ; Vuelve al estado 0 para reiniciar el ciclo
+        RETURN
+
+	
+;-------------------------------------------------------------------------------
+; @brief BIN2BCD
+; @details Convierte el valor hexadecimal de LPM_ACTUAL en dígitos decimales.
+;-------------------------------------------------------------------------------
+BIN2BCD:
+        MOVF    LPM_ACTUAL, W
+        MOVWF   TEMP_LPM            ; Hacemos copia de seguridad
+        CLRF    CENTENAS
+        CLRF    DECENAS
+        CLRF    UNIDADES
+        
+BCD_100:
+        MOVLW   .100
+        SUBWF   TEMP_LPM, W
+        BTFSS   STATUS, C           ; ¿El resultado fue negativo?
+        GOTO    BCD_10              ; Si es negativo, pasamos a restar de a 10
+        MOVWF   TEMP_LPM            ; Guardamos la resta
+        INCF    CENTENAS, F         ; Sumamos 1 a las centenas
+        GOTO    BCD_100
+        
+BCD_10:
+        MOVLW   .10
+        SUBWF   TEMP_LPM, W
+        BTFSS   STATUS, C
+        GOTO    BCD_1
+        MOVWF   TEMP_LPM
+        INCF    DECENAS, F
+        GOTO    BCD_10
+        
+BCD_1:
+        MOVF    TEMP_LPM, W
+        MOVWF   UNIDADES            ; El resto directo a las unidades
+        RETURN
+
+;-------------------------------------------------------------------------------
+; @brief TABLA_7SEG
+; @details Devuelve el código para cátodo común. Desplazado 1 bit a la izquierda 
+;          porque RB0 está ocupado por la interrupción.
+;-------------------------------------------------------------------------------
+TABLA_7SEG:
+        ADDWF   PCL, F              ; Salto indexado sumando W al Program Counter
+        RETLW   0x7E                ; Número 0
+        RETLW   0x0C                ; Número 1
+        RETLW   0xB6                ; Número 2
+        RETLW   0x9E                ; Número 3
+        RETLW   0xCC                ; Número 4
+        RETLW   0xDA                ; Número 5
+        RETLW   0xFA                ; Número 6
+        RETLW   0x0E                ; Número 7
+        RETLW   0xFE                ; Número 8
+        RETLW   0xDE                ; Número 9
     
  ;===============================================================================
 ; VECTOR DE INTERRUPCION (ISR)
@@ -361,3 +499,15 @@ FIN_ISR:
 ;===============================================================================
 
         END
+
+
+
+
+
+
+
+
+
+
+
+
